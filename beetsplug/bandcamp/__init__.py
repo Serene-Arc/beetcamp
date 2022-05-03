@@ -17,6 +17,7 @@
 """Adds bandcamp album search support to the autotagger."""
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+import json
 import logging
 import re
 from difflib import SequenceMatcher
@@ -32,6 +33,7 @@ from beets.autotag.hooks import AlbumInfo, TrackInfo
 from beetsplug import fetchart  # type: ignore[attr-defined]
 
 from ._metaguru import DATA_SOURCE, Metaguru, urlify
+from .soundcloud import get_soundcloud_track
 
 JSONDict = Dict[str, Any]
 
@@ -227,7 +229,7 @@ class BandcampPlugin(BandcampRequestsHandler, plugins.BeetsPlugin):
 
     def track_for_id(self, track_id: str) -> Optional[TrackInfo]:
         """Fetch a track by its bandcamp ID."""
-        if _from_bandcamp(track_id):
+        if "soundcloud" in track_id or _from_bandcamp(track_id):
             return self.get_track_info(track_id)
 
         self._info("Not a bandcamp URL, skipping")
@@ -256,8 +258,23 @@ class BandcampPlugin(BandcampRequestsHandler, plugins.BeetsPlugin):
         guru = self.guru(url, html=html)
         return self.handle(guru, "albums", url) if guru else None
 
+    def _get_soundcloud_data(self, url: str) -> Optional[TrackInfo]:
+        self._info("Fetching data from soundcloud url {} as a track", url)
+        data = re.search(r"\[\{[^<]+[^;<)]", self._get(url))
+        if data:
+            jdata = json.loads(data.group())
+            track = next(filter(lambda x: x.get("hydratable") == "sound", jdata))
+            return get_soundcloud_track(track["data"], self.config["genre"].flatten())
+
+        return None
+
     def get_track_info(self, url: str) -> Optional[TrackInfo]:
         """Returns a TrackInfo object for a bandcamp track page."""
+        if "soundcloud" in url:
+            track = self._get_soundcloud_track(url)
+            if track:
+                return track
+
         guru = self.guru(url)
         return self.handle(guru, "singleton", url) if guru else None
 
