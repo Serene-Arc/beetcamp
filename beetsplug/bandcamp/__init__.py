@@ -77,7 +77,7 @@ class BandcampRequestsHandler:
         except requests.exceptions.RequestException:
             self._info("Error while fetching URL: {}", url)
             return ""
-        return unescape(response.text)
+        return response.text
 
 
 class BandcampAlbumArt(BandcampRequestsHandler, fetchart.RemoteArtSource):
@@ -281,7 +281,7 @@ class BandcampPlugin(BandcampRequestsHandler, plugins.BeetsPlugin):
     def get_track_info(self, url: str) -> Optional[TrackInfo]:
         """Returns a TrackInfo object for a bandcamp track page."""
         if "soundcloud" in url:
-            track = self._get_soundcloud_track(url)
+            track = self._get_soundcloud_data(url)
             if track:
                 return track
 

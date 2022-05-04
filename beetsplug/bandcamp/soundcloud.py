@@ -1,4 +1,3 @@
-import operator as op
 import re
 from typing import Any, Dict
 from unicodedata import normalize
@@ -6,7 +5,6 @@ from unicodedata import normalize
 from beets.autotag.hooks import TrackInfo
 from pycountry import countries, subdivisions
 
-from . import DEFAULT_CONFIG
 from ._metaguru import COUNTRY_OVERRIDES, DIGI_MEDIA, Helpers
 
 JSONDict = Dict[str, Any]
@@ -96,7 +94,6 @@ def parse_title(source: str, title: str) -> JSONDict:
         mdata = match.groupdict()
         data.update(mdata)
 
-    print(data)
     data["track"] = data.get("index")
     artist = data.get("artist") or ""
     if not artist:
@@ -111,9 +108,7 @@ def parse_title(source: str, title: str) -> JSONDict:
     return data
 
 
-def get_soundcloud_track(
-    data: JSONDict, config: JSONDict = DEFAULT_CONFIG["genre"]
-) -> TrackInfo:
+def get_soundcloud_track(data: JSONDict, config: JSONDict) -> TrackInfo:
     from dateutil.parser import isoparse
 
     userdata = data.get("user") or dict()
@@ -145,19 +140,6 @@ def get_soundcloud_track(
         data_url=url,
         artist_id=userdata["urn"],
         artist=userdata["username"],
-        artist_credit=", ".join(
-            filter(
-                op.truth,
-                (
-                    userdata.get("first_name") or "",
-                    userdata.get("last_name") or "",
-                    userdata.get("description") or "",
-                    f"{userdata['track_count']} tracks"
-                    if userdata["track_count"]
-                    else "",
-                ),
-            )
-        ),
     )
     print(track)
     artwork_url = (data.get("artwork_url") or "").replace("-large", "-t500x500")
