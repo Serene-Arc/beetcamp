@@ -113,7 +113,7 @@ def test_urlify(title, expected):
             "Ellie Goulding- Eyed ( ROWDIBOÏ EDIT))",
             ("", "Ellie Goulding", "", "Eyed (ROWDIBOÏ EDIT)", "Eyed"),
         ),
-        ("Space Jam - (RZVX EDIT)", ("", "", "", "Space Jam (RZVX EDIT)", "Space Jam")),
+        ("Space Jam - (RZVX EDIT)", ("", "Space Jam", "", "(RZVX EDIT)", "(RZVX EDIT)")),
         ("¯\\_(ツ)_/¯", ("", "", "", "¯\\_(ツ)_/¯", "¯\\_(ツ)_/¯")),
         ("VIENNA (WARM UP MIX", ("", "", "", "VIENNA (WARM UP MIX", "VIENNA")),
         ("MOD-R - ARE YOU", ("", "MOD-R", "", "ARE YOU", "ARE YOU")),
@@ -164,9 +164,14 @@ def test_parse_track_name(name, expected, beets_config):
             ["9 Artist - Title", "Artist - Title"],
         ),
         (
-            ["NYH244 04 Artist - Title", "NYH244 05 Artist - Title"],
+            ["NYH244 01 Artist - Title", "NYH244 02 Artist - Title"],
             "NYH244",
             ["Artist - Title", "Artist - Title"],
+        ),
+        (
+            ["1.0 Artist - Title [Some Album EP]", "2+2 Artist - Title [HELLO123]"],
+            "",
+            ["1.0 Artist - Title", "2+2 Artist - Title"],
         ),
     ],
 )
@@ -181,11 +186,11 @@ def test_clean_track_names(names, catalognum, expected):
         ("Artist Album EP", ["Artist"], "Album EP"),
         ("Artist EP", ["Artist"], ""),
         ("Album Artist EP", ["Artist"], "Album EP"),
-        ("CAT001 - Artist Album EP", ["Artist"], "Album EP"),
+        ("CAT001 - Artist Album EP", ["Artist"], "CAT001 Album EP"),
     ],
 )
 def test_clean_ep_lp_name(album, artists, expected):
-    assert Metaguru.clean_ep_lp_name(album, artists) == expected
+    assert Metaguru.clean_name(album, *artists) == expected
 
 
 @pytest.mark.parametrize(

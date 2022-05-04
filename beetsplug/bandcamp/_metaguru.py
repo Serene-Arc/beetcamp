@@ -7,12 +7,12 @@ import sys
 from collections import Counter, defaultdict
 from datetime import date, datetime
 from functools import partial
-from html import unescape
 from typing import Any, Dict, Iterable, List, Optional, Set
 from unicodedata import normalize
 
 from beets import config as beets_config
 from beets.autotag.hooks import AlbumInfo, TrackInfo
+from ordered_set import OrderedSet as ordset  # type: ignore[import]
 from pkg_resources import get_distribution, parse_version
 from pycountry import countries, subdivisions
 
@@ -68,12 +68,11 @@ class Metaguru(Helpers):
     @classmethod
     def from_html(cls, html: str, config: JSONDict = None) -> "Metaguru":
         try:
-            meta = json.loads(re.search(PATTERNS["meta"], html).group())  # type: ignore
-            meta["tracks"] = list(map(unescape, re.findall(r"^[0-9]+[.] .*", html, re.M)))
+            meta = re.search(PATTERNS["meta"], html).group()  # type: ignore[union-attr]
         except AttributeError as exc:
             raise AttributeError("Could not find release metadata JSON") from exc
-
-        return cls(meta, config)
+        else:
+            return cls(json.loads(meta), config)
 
     @cached_property
     def excluded_fields(self) -> Set[str]:
@@ -208,12 +207,14 @@ class Metaguru(Helpers):
         if not self._singleton or len(self.raw_artists) > 1:
             artists.extend(self.raw_artists)
             artists.extend(self.remixers)
+
         return self.parse_catalognum(
             self.meta["name"],
             self.disctitle,
             self.media.description + "\n" + self.comments,
-            self.label,
-            artists,
+            self.label if not self._singleton else "",
+            tuple(self.track_names),
+            tuple(artists),
         )
 
     @cached_property
@@ -262,7 +263,7 @@ class Metaguru(Helpers):
                 index=position,
                 track_id=item.get("@id"),
                 length=self.get_duration(item) or None,
-                **self.parse_track_name(self.clean_name(name), delim),
+                **self.parse_track_name(name, delim),
             )
             lyrics = item.get("recordingOf", {}).get("lyrics", {}).get("text")
             if lyrics:
@@ -288,10 +289,7 @@ class Metaguru(Helpers):
 
     @cached_property
     def track_names(self) -> List[str]:
-        raw_tracks = self.meta.get("tracks") or []
-        if raw_tracks:
-            return list(map(lambda x: x.split(". ", maxsplit=1)[1], raw_tracks))
-
+        raw_tracks = []
         for item in map(lambda x: x["item"], self.json_tracks):
             name = item["name"]
             artist = item.get("byArtist", {}).get("name")
@@ -317,15 +315,17 @@ class Metaguru(Helpers):
         if self.va:
             return self.va_name
 
+        aartist = self.original_albumartist
         if self.unique_artists:
-            return ", ".join(sorted(self.unique_artists))
-        return self.original_albumartist
+            aartist = ", ".join(sorted(self.unique_artists))
+
+        return aartist.replace(", more", "")
 
     @cached_property
     def vinyl_disctitles(self) -> str:
         return " ".join([m.title for m in self.media_formats if m.name == "Vinyl"])
 
-    def search_albumtype(self, word: str) -> bool:
+    def _search_albumtype(self, word: str) -> bool:
         """Return whether the given word (ep or lp) matches the release albumtype.
         True when one of the following conditions is met:
         * if {word}[0-9] is found in the catalognum
@@ -350,12 +350,12 @@ class Metaguru(Helpers):
     @cached_property
     def is_lp(self) -> bool:
         """Return whether the release is an LP."""
-        return self.search_albumtype("lp")
+        return self._search_albumtype("lp")
 
     @cached_property
     def is_ep(self) -> bool:
         """Return whether the release is an EP."""
-        return self.search_albumtype("ep")
+        return self._search_albumtype("ep")
 
     def check_albumtype_in_descriptions(self) -> str:
         """Count 'lp', 'album' and 'ep' words in the release and media descriptions
@@ -378,9 +378,11 @@ class Metaguru(Helpers):
             return PATTERNS["split_artists"].split(artist.replace(" & ", ", "))[0]
 
         truly_unique = set(map(first_one, self.track_artists))
-        return bool(
-            re.search(r"compilation|best of|anniversary", self.album_name, re.I)
-        ) or (len(truly_unique) > 3 and len(self.tracks) > 4)
+        return (
+            bool(re.search(r"compilation|best of|anniversary", self.album_name, re.I))
+            or self._search_albumtype("compilation")
+            or (len(truly_unique) > 3 and len(self.tracks) > 4)
+        )
 
     @cached_property
     def albumtype(self) -> str:
@@ -403,15 +405,18 @@ class Metaguru(Helpers):
     @cached_property
     def albumtypes(self) -> str:
         albumtypes = {self.albumtype}
-        if self.albumtype == "compilation":
-            albumtypes.add("album")
+        if self.is_comp:
+            if self.albumtype == "ep":
+                albumtypes.add("compilation")
+            else:
+                albumtypes.add("album")
         if self.is_lp:
             albumtypes.add("lp")
         if len({t["main_title"] for t in self.tracks}) == 1:
             albumtypes.add("single")
-        for word in ["remix", "live", "soundtrack"]:
+        for word in ["remix", "rmx", "live", "soundtrack"]:
             if word in self.album_name.lower():
-                albumtypes.add(word)
+                albumtypes.add(word.replace("rmx", "remix"))
 
         return "; ".join(sorted(albumtypes))
 
@@ -458,27 +463,25 @@ class Metaguru(Helpers):
             return self.parsed_album_name
 
         album = self.album_name
-        # look for something in quotes
-        match = re.search(r"(?:^| )(['\"])(.+?)\1(?: |$)", album)
-        if match:
-            album = match.expand(r"\2")
-        album = self.clean_name(album, self.catalognum, remove_extra=True)
-        if (
-            album
-            and not re.search(r"\W | [EL]P", album)  # no delimiters
-            and album not in self.unique_artists  # and it isn't one of the artists
-        ):
-            return album
-
-        if " EP" in album or " LP" in album:
-            album = self.clean_ep_lp_name(album, self.unique_artists)
+        for title in self.track_names:
+            match = re.search(r"\[([^\]]+[EL]P)\]", title)
+            if match:
+                album = match.group(1)
+                break
         else:
-            album = self.clean_name(
-                album,
-                self.bandcamp_albumartist,
-                *self.unique_artists,
-                self.parsed_albumartist,
-            )
+            match = re.search(r"(['\"])([^'\"]+)\1( VA[0-9]+)*( |$)", album)
+            if match:
+                album = match.expand(r"\2\3")
+
+        clean_album = self.clean_name(album, self.catalognum, remove_extra=True)
+
+        artists = ordset(
+            [self.bandcamp_albumartist, *self.track_artists, *self.unique_artists]
+        ) - {self.label}
+        clean_album = self.clean_name(clean_album, *artists, label=self.label)
+
+        if not clean_album.startswith("("):
+            album = clean_album
         return album or self.album_name_with_eplp or self.catalognum or self.album_name
 
     @property
@@ -501,13 +504,7 @@ class Metaguru(Helpers):
     @property
     def _common_album(self) -> JSONDict:
         common_data: JSONDict = dict(album=self.clean_album_name)
-        fields = [
-            "label",
-            "catalognum",
-            "albumtype",
-            "albumstatus",
-            "country",
-        ]
+        fields = ["label", "catalognum", "albumtype", "albumstatus", "country"]
         if NEW_BEETS:
             fields.extend(["genre", "style", "comments", "albumtypes"])
         common_data.update(self.get_fields(fields))

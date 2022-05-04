@@ -8,7 +8,7 @@ from string import Template
 from typing import Any, Callable, Dict, Iterable, List, NamedTuple, Pattern, Tuple, Union
 
 from beets.autotag.hooks import AlbumInfo
-from ordered_set import OrderedSet as ordset
+from ordered_set import OrderedSet as ordset  # type: ignore
 
 from .genres_lookup import GENRES
 
@@ -32,7 +32,7 @@ class MediaInfo(NamedTuple):
 
 
 _catalognum = Template(
-    r"""(?<![/@])(\b
+    r"""(?<![]/@-])(\b
 (?!\W|VA[\d ]+|[EL]P\W|[^\n.]+[ ](?:[0-9]KG|20\d{2}|VA[ \d]+)|AT[ ]0|GC1|HF[.])
 (?!(?i:vol |mp3|christ|vinyl|disc|session|record|artist|the\ |maxi\ |rave\ ))
 (?![^.]+shirt)
@@ -61,6 +61,7 @@ _cat_pattern = _catalognum.template
 CATNUM_PAT = {
     "with_header": re.compile(r"(?:^|\s)cat[\w .]+?(?:number:?|:) ?(\w[^\n,]+)", re.I),
     "start_end": re.compile(fr"((^|\n){_cat_pattern}|{_cat_pattern}(\n|$))", re.VERBOSE),
+    "delimited": re.compile(fr"(?:[\[(]){_cat_pattern}(?:[])]|$)", re.VERBOSE),
     "anywhere": re.compile(_cat_pattern, re.VERBOSE),
 }
 
@@ -69,22 +70,25 @@ rm_strings = [
     r"^[EL]P( [0-9]+)?",
     r"^Vol(ume)?\W*\d",
     r"(digital )?album\)",
-    r"^va|va$|vinyl|compiled by .*",
+    r"^va|va$|vinyl(-only)?|compiled by .*",
     r"free download|free dl|free\)",
 ]
 PATTERNS: Dict[str, Pattern] = {
-    "split_artists": re.compile(r", | (?:[x+/-]|vs)[.]? "),
-    "clean_title": re.compile(fr"(?i:[\[(]?\b({'|'.join(rm_strings)})(\b\W*|$))"),
+    "split_artists": re.compile(r", | (?:[x+/-]|vs|and)[.]? "),
+    "clean_title": re.compile(fr"(?i:[\[(*]?\b({'|'.join(rm_strings)})(\b\W*|$))"),
     "clean_incl": re.compile(r"(\(?incl|\((inc|tracks|.*remix( |es)))([^)]+\)|.*)", re.I),
     "meta": re.compile(r'.*"@id".*', re.M),
     "digital": [  # type: ignore
         re.compile(r"^(DIGI(TAL)? ?[\d.]+|Bonus\W{2,})\W*"),
         re.compile(
-            r"[^\w\)]+(bandcamp[^-]+|digi(tal)?)(\W*(\W+|only|bonus|exclusive)\W*$)", re.I
+            r"[^\w)]+(bandcamp[^-]+|digi(tal)?)(\W*(\W+|only|bonus|exclusive)\W*$)", re.I
         ),
+        re.compile(r"[^\w)]+(bandcamp exclusive )?bonus( track)?(\]|\W*$)", re.I),
     ],
     "remix_or_ft": re.compile(r" [\[(].*(?i:mix|edit|f(ea)?t([.]|uring)?).*"),
-    "ft": re.compile(r" *[( ]((?![^()]+?mix)f(ea)?t([. ]|uring)[^()]+)\)? *", re.I),
+    "ft": re.compile(
+        r" *((([\[(])| )f(ea)?t([. ]|uring)(?![^()]*mix)[^]\[()]+(?(3)[]\)])) *", re.I
+    ),
     "track_alt": re.compile(r"^([ABCDEFGHIJ]{1,3}[0-6])\W+", re.I + re.M),
     "vinyl_name": re.compile(r"[1-5](?= ?(xLP|LP|x))|single|double|triple", re.I),
 }
@@ -167,15 +171,18 @@ class Helpers:
         remixer = match.group() if match else ""
 
         # remove any duplicate artists keeping the order
-        artist = ", ".join(ordset(parts))
+        artists = ordset((next(orig) for _, orig in it.groupby(ordset(parts), str.lower)))
+        artist = ", ".join(artists)
         # remove remixer
         artist = artist.replace(remixer, "").strip(",")
         # split them taking into account other delimiters
         artists = ordset(Helpers.split_artists(parts))
 
         # remove remixer. We cannot use equality here since it is not reliable
-        # consider Hello, Bye = Nice day (Bye Lovely Day Mix). Bye != Bye Lovely Day,
-        # therefore we check whether Bye is contained in Bye Lovely Day instead
+        # consider
+        #           Hello, Bye - Nice day (Bye Lovely Day Mix)
+        # Bye != Bye Lovely Day, therefore we check whether 'Bye' is found in
+        # 'Bye Lovely Day' instead
         for artist in filter(lambda x: x in remixer, artists.copy()):
             artists.discard(artist)
             artist = ", ".join(artists)
@@ -187,15 +194,18 @@ class Helpers:
         for entity in "artist", "title":
             match = PATTERNS["ft"].search(track[entity])
             if match:
-                track[entity] = track[entity].replace(match.group(), " ").strip()
-                track["ft"] = match.expand(r"\1")
+                # replacing with a space in case it's found in the middle of the title
+                # if it's at the end, it gets stripped
+                track[entity] = track[entity].replace(match.group().rstrip(), "").strip()
+                track["ft"] = match.group(1).strip("([]) ")
 
         track["main_title"] = PATTERNS["remix_or_ft"].sub("", track["title"])
         return track
 
     @staticmethod
     def adjust_artists(tracks: List[JSONDict], aartist: str) -> List[JSONDict]:
-        track_alts = set(filter(op.truth, (t["track_alt"] for t in tracks)))
+        track_alts = {t["track_alt"] for t in tracks if t["track_alt"]}
+        artists = [t["artist"] for t in tracks if t["artist"]]
         for t in tracks:
             # a single track_alt is missing -> check for a single letter, like 'A',
             # in the artist field
@@ -211,6 +221,15 @@ class Helpers:
                     t["artist"] = t["artist"].replace(match.group(), "", 1)
 
             if len(tracks) > 1 and not t["artist"]:
+                if len(artists) == len(tracks) - 1:
+                    # this is the only artist that didn't get parsed - relax the rule
+                    # and try splitting with '-'
+                    split = t["title"].split("-")
+                    if len(split) > 1:
+                        t["artist"] = split[0]
+                        t["title"] = split[1]
+                        continue
+
                 if t["track_alt"] and len(track_alts) == 1:
                     # one of the artists ended up as a track alt, like 'B2'
                     t.update(artist=t.get("track_alt"), track_alt=None)
@@ -221,30 +240,40 @@ class Helpers:
         return tracks
 
     @staticmethod
-    def parse_catalognum(album, disctitle, description, label, exclude=[]):
-        # type: (str, str, str, str, List[str]) -> str
+    @lru_cache(maxsize=None)
+    def parse_catalognum(album, disctitle, description, label, tracks, artists):
+        # type: (str, str, str, str, Tuple[str], Tuple[str]) -> str
         """Try getting the catalog number looking at text from various fields."""
+        tracks_str = "\n".join(tracks)
         cases = [
             (CATNUM_PAT["with_header"], description),
             (CATNUM_PAT["anywhere"], disctitle),
             (CATNUM_PAT["anywhere"], album),
             (CATNUM_PAT["start_end"], description),
             (CATNUM_PAT["anywhere"], description),
+            (CATNUM_PAT["delimited"], tracks_str),
         ]
         if label:
             pat = re.compile(_catalognum.substitute(label=re.escape(label)), re.VERBOSE)
             cases.append((pat, "\n".join((album, disctitle, description))))
 
         def find(pat: Pattern, string: str) -> str:
-            try:
-                return pat.search(string).groups()[0].strip()  # type: ignore
-            except (IndexError, AttributeError):
-                return ""
+            match = pat.search(string)
+            return match.group(1).strip() if match else ""
 
-        ignored = set(map(str.casefold, exclude))
+        ignored = set(map(str.lower, artists))
 
         def not_ignored(option: str) -> bool:
-            return bool(option) and option.casefold() not in ignored
+            """Suitable match if:
+            - is not empty
+            - is not one of the artists
+            - is not found in none of the track names except when it's in all of them
+            """
+            return (
+                bool(option)
+                and option.lower() not in ignored
+                and (option not in tracks_str or all(option in x for x in tracks))
+            )
 
         try:
             return next(filter(not_ignored, it.starmap(find, cases)))
@@ -267,57 +296,47 @@ class Helpers:
         """
         replacements: List[Tuple[str, Union[str, Callable]]] = [
             (r"  +", " "),  # multiple spaces
-            (r"\( +|(- )?\(+", "("),  # rubbish that precedes opening parenthesis
-            (r" \)+|(?<=(?i:.mix|edit))\)+$", ")"),
+            (r"\( +", "("),  # rubbish that precedes opening parenthesis
+            (r" \)+|\)+$", ")"),
             ('"', ""),  # double quote anywhere in the string
             # spaces around dash in remixer names within parens
             (r"(\([^)]+) - ([^(]+\))", r"\1-\2"),
-            (r"[\[(][A-Z]+[0-9]+[\])]", ""),
+            (r"\[[A-Z]+[0-9]+\]", ""),
             # uppercase EP and LP, and remove surrounding parens / brackets
-            (r"(\S*(\b(?i:[EL]P)\b)\S*)", lambda x: x.expand(r"\2").upper()),
+            (r"\S*(?i:(?:Double )?(\b[EL]P\b))\S*", lambda x: x.expand(r"\1").upper()),
+            (r"- Reworked", "(Reworked)")
         ]
         for pat, repl in replacements:
             name = re.sub(pat, repl, name).strip()
-        for arg in filter(op.truth, args):
-            esc = re.escape(arg)
-            name = re.sub(fr"[^'\])\w]*(?i:{esc})[^'(\[\w]*", " ", name).strip()
 
-        rm = f"(Various Artists?|{label})" if label else "Various Artists?"
-        name = re.sub(
-            fr"(?i:(\W\W+{rm}\W*|\W*{rm}(\W\W+|$)|(^\W*{rm}\W*$)))", " ", name
-        ).strip()
+        for arg in [re.escape(arg) for arg in filter(op.truth, args)] + [
+            r"Various Artists?\b(?! \w)"
+        ]:
+            if not re.search(fr"\w {arg} \w", name, re.I):
+                name = re.sub(
+                    fr"(^|[^'\])\w]|_|\b)+(?i:{arg})([^'(\[\w]|_|([0-9]+$))*", " ", name
+                ).strip()
+
+        if label and not re.search(fr"\w {label} \w|\w {label}$", name):
+            pat = fr"(\W\W+{label}\W*|\W*{label}(\W\W+|$)|(^\W*{label}\W*$))(VA)?\d*"
+            name = re.sub(pat, " ", name, re.I).strip()
+
         if remove_extra:
             # redundant information about 'remixes from xyz'
             name = PATTERNS["clean_incl"].sub("", name)
         return PATTERNS["clean_title"].sub("", name).strip(" -|/")
 
     @staticmethod
-    def clean_ep_lp_name(album: str, artists: List[str]) -> str:
-        """Parse album name - which precedes 'LP' or 'EP' in the release title.
-        Attempt to remove artist names from the parsed string:
-        * If we're only left with 'EP', it means that the album name is made up of those
-          artists - in that case we keep them.
-        * Otherwise, we will end up cleaning a release title such as 'Artist Album EP',
-          where the artist is not clearly separated from the album name.
-        """
-        match = re.search(r".+[EL]P", re.sub(r".* [-|] | [\[(][^ ]*|[\])]", "", album))
-        if not match:
-            return ""
-        album_with_artists = match.group().strip()
-        clean_album = Helpers.clean_name(album_with_artists, *artists)
-        return album_with_artists if len(clean_album) == 2 else clean_album
-
-    @staticmethod
     def clean_track_names(names: List[str], catalognum: str = "") -> List[str]:
         """Remove catalogue number and leading numerical index if they are found."""
-        if catalognum:
-            names = list(map(lambda x: Helpers.clean_name(x, catalognum), names))
-
-        len_tot = len(names)
-        if len_tot > 1 and sum(map(lambda x: int(x[0].isdigit()), names)) > len_tot / 2:
-            pat = re.compile(r"^\d+\W+")
-            names = list(map(lambda x: pat.sub("", x), names))
-        return names
+        ep_album_pat = re.compile(r" *\[[^\]]+ [EL]P\]+")
+        new_names = []
+        for idx, name in enumerate(names, 1):
+            name = ep_album_pat.sub("", name)
+            name = Helpers.clean_name(name, catalognum)
+            name = re.sub(fr"^0*{idx}(?!\W\d)\W+", "", name)
+            new_names.append(name)
+        return new_names
 
     @staticmethod
     def track_delimiter(names: List[str]) -> str:

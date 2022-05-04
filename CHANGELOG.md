@@ -1,3 +1,106 @@
+## [0.15.0] Unreleased
+
+### Added
+
+* search: you can now try searching from the command line: `beetcamp <query> [artist] [label]`.
+    If the `query` argument starts with `https://`, it will fetch the release information
+    like before. If not, it will return a JSON list with all search results found in
+    the first page (only showing the first 2 in the examples below). Searching for release
+    **black sands** by **bonobo**:
+
+    ```json
+    $ beetcamp 'black sands' bonobo | jq '.[:2]'
+    [
+      {
+        "url": "https://bonobomusic.bandcamp.com/album/black-sands",
+        "label": "bonobomusic",
+        "release": "Black Sands",
+        "artist": "Bonobo",
+        "similarity": 1
+      },
+      {
+        "url": "https://bonobomusic.bandcamp.com/album/black-sands-remixed",
+        "label": "bonobomusic",
+        "release": "Black Sands Remixed",
+        "artist": "Bonobo",
+        "similarity": 0.93
+      }
+    ]
+    ```
+
+    Searching for release **weapons 001**, using empty artist (won't be used in the
+    ranking) and looking for label **raise**:
+    ```json
+    $ beetcamp 'weapons 001' '' raise | jq '.[:2]'
+    [
+      {
+        "url": "https://raiserecords.bandcamp.com/album/weapons-001-various-artists",
+        "label": "raiserecords",
+        "release": "WEAPONS 001 - VARIOUS ARTISTS",
+        "artist": "Mac Declos, Lacchesi, Umbraid, Lisa, Absurd, Moth, Clinical Hates, Eastel",
+        "similarity": 0.799
+      },
+      {
+        "url": "https://raiserecords.bandcamp.com/album/weapons-002-tauceti",
+        "label": "raiserecords",
+        "release": "WEAPONS 002 - TAUCETI",
+        "artist": "TAUCETI, Darzack, Raär, Mac Declos",
+        "similarity": 0.785
+      }
+    ]
+    ```
+
+### Updated
+
+* search: 
+  * if `label` field is available, the plugin now takes it into account when it ranks
+    search results. 
+  * `albumartist` field is not used to rank **compilations** anymore since some labels use
+    label name, some use the list of artists, and others a variation of **Various Artists** - 
+    we cannot reliably tell. `label` is used instead.
+
+* `album`: track titles are read to see whether they contain the album name. There are
+  cases where titles follow the following format: **Title ["Album Name" EP]'**
+
+* `catalognum`: 
+  - do not match if preceded by **]** character
+  - parse track titles for catalogue numbers
+
+* `albumtype`: to determine whether a release is a compilation, check comments for string
+  **compilation**
+
+* `albumtypes`:
+  - **remix**: check for string **rmx** in album name
+  - **compilation**: even if a release is an **ep**, check whether it's also a compilation
+    and include it
+
+### Fixed
+
+* `album`: simplified album name clean-up logic and thus fixed a couple of edge cases
+* `title`: 
+  - some track titles which contain something in parentheses would have that part wrongly
+    removed. This is now fixed.
+  - minor fixes to do with featuring artists extraction from the title
+    For example, title: **Title (Extended ft. Some Artist)**
+    previously: **Title (Extended**
+    now: **Title (Extended)**
+  - allow titles to start with an opening parentheses :exploding_head:
+  - remove variations of **Bonus track** and **vinyl-only** from the title
+
+* `albumartist`: remove **, more** from the end
+
+* `artist`: 
+  - featuring artists given in square brackets are now parsed correctly
+  - lower/uppercase differences in the artist name are now taken into account and are
+    handled as the same artist
+  - when only one of the track artists in the release is not found, try splitting with
+    **-** to account for bad formatting
+
+* `catalognum`: in rare cases, if the track list was given in the comments, one of the
+  track titles would get assumed for the catalognum and subsequently cleaned up. From now
+  on this will only apply if **all** track names include the match (usually delimited by
+  brackets at the end)
+
 ## [0.14.0] 2022-04-18
 
 ### Added

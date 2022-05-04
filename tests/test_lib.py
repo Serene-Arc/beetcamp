@@ -7,7 +7,6 @@ import os
 import re
 from collections import Counter, defaultdict, namedtuple
 from functools import partial
-from html import unescape
 from itertools import groupby
 from operator import truth
 
@@ -22,7 +21,8 @@ pytestmark = pytest.mark.lib
 
 BASE_DIR = "lib_tests"
 TEST_DIR = "dev"
-REFERENCE_DIR = "593e757"
+REFERENCE_DIR = "54c0979"
+JSONS_DIR = "jsons"
 
 IGNORE_FIELDS = {
     "bandcamp_artist_id",
@@ -35,6 +35,7 @@ IGNORE_FIELDS = {
     "price",
     "mastering",
     "artwork",
+    "city",
 }
 
 target_dir = os.path.join(BASE_DIR, TEST_DIR)
@@ -44,7 +45,7 @@ if not os.path.exists(target_dir):
 install(show_locals=True, extra_lines=8, width=int(os.environ.get("COLUMNS", 150)))
 console = make_console(stderr=True, record=True)
 
-testfiles = sorted(filter(lambda x: x.endswith("json"), os.listdir("jsons")))
+testfiles = sorted(filter(lambda x: x.endswith("json"), os.listdir(JSONS_DIR)))
 
 
 Oldnew = namedtuple("Oldnew", ["old", "new", "diff"])
@@ -67,11 +68,11 @@ def _report():
                 " | ".join(
                     map(
                         lambda x: (f"{x[1]} x " if x[1] > 1 else "")
-                        + wrap(x[0], "b s red"),
+                        + wrap(re.sub(r"\\?\[", r"\\[", x[0]), "b s red"),
                         Counter(map(lambda x: x.old, all_old)).items(),
                     )
                 ),
-                wrap(new, "b green"),
+                wrap(re.sub(r"\\?\[", r"\\[", new), "b green"),
             )
         cols.append(border_panel(tab, title=field))
 
@@ -164,15 +165,11 @@ def file(request):
 
 @pytest.fixture
 def guru(file, config):
-    meta_file = os.path.join("jsons", file)
-    tracks_file = os.path.join("jsons", file.replace(".json", ".tracks"))
+    meta_file = os.path.join(JSONS_DIR, file)
 
     with open(meta_file) as f:
         meta = f.read()
 
-    if os.path.exists(tracks_file):
-        with open(tracks_file) as f:
-            meta += "\n" + unescape(unescape(f.read()))
     return Metaguru.from_html(meta, config)
 
 
