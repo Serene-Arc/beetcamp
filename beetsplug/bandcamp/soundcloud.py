@@ -76,6 +76,12 @@ def parse_title(source: str, title: str) -> JSONDict:
     elif title.startswith("Hard Dance"):
         data["album"] = "Hard Dance"
         pat = fr"{index_pat} [:] {artist_pat}"
+    elif "SLIT " in title:
+        data["album"] = "SLIT"
+        pat = fr"{artist_pat} [|] SLIT - {title_pat}$"
+    elif "FOLD Invites" in title:
+        data["album"], data["title"] = "FOLD Invites", title
+        pat = fr"Invites {artist_pat}$"
     elif source == "Sarunas":
         data["artist"] = "SN"
         data["title"] = title
@@ -89,10 +95,11 @@ def parse_title(source: str, title: str) -> JSONDict:
         pat = "aaaaaa"
     else:
         pat = fr"{artist_pat} - {title_pat}"
-    match = re.search(pat, title)
-    if match:
-        mdata = match.groupdict()
-        data.update(mdata)
+    if pat:
+        match = re.search(pat, title)
+        if match:
+            mdata = match.groupdict()
+            data.update(mdata)
 
     data["track"] = data.get("index")
     artist = data.get("artist") or ""
@@ -120,7 +127,7 @@ def get_soundcloud_track(data: JSONDict, config: JSONDict) -> TrackInfo:
         index=0,
         track_id=url,
         isrc=(data.get("publisher_metadata") or {}).get("isrc"),
-        length=round(data["duration"] / 1000),
+        length=round(data["duration"] / 1000) - 1,
         label=data.get("label_name") or userdata["username"],
         media=DIGI_MEDIA,
         genre=", ".join(
@@ -156,11 +163,12 @@ def get_soundcloud_track(data: JSONDict, config: JSONDict) -> TrackInfo:
     albumtypes = {track.albumtype}
     if track.length > 2000:
         track.albumtype = "broadcast"
-        albumtypes.update({"dj-mix", "broadcast"})
+        albumtypes = {"dj-mix", "broadcast"}
     if "live" in (track.get("title") or ""):
         albumtypes.add("live")
     track.albumtypes = "; ".join(sorted(albumtypes))
-    track.albumstatus = "Official"
+    if "album" in track:
+        track.albumstatus = "Official"
 
     track.albumartist = ""
     if track.get("album"):

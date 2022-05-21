@@ -1,51 +1,52 @@
-## [0.15.0] Unreleased
+## [0.16.0] Unreleased
+
+### Fixed
+
+* album: When album name contains **Album (Label something)**, the Label is kept in place
+  since it immediately follows an opening parenthesis.
+
+
+## [0.15.0] 2022-05-16
 
 ### Added
 
-* search: you can now try searching from the command line: `beetcamp <query> [artist] [label]`.
-    If the `query` argument starts with `https://`, it will fetch the release information
-    like before. If not, it will return a JSON list with all search results found in
-    the first page (only showing the first 2 in the examples below). Searching for release
-    **black sands** by **bonobo**:
+* search: 
+  - you can now search from the command line: 
+    ```sh
+    beetcamp [ [-alt] QUERY | RELEASE-URL ]
+    ```
+
+  - Search is activated with an argument that does not start with **https://**. It queries
+    bandcamp with the provided QUERY and returns a JSON list with all search results from
+    the first page, sorted by relevancy.
+
+  - Flags **-a**, **-l** and **-t** can be used to search for **album**, **label/artist** or
+    **track** specifically. 
+
+  - Run `beetcamp -h` to see more details. Example: searching for anything called **black sands**:
 
     ```json
-    $ beetcamp 'black sands' bonobo | jq '.[:2]'
+    $ beetcamp 'black sands' | jq '.[:2]'
     [
       {
+        "type": "album",
+        "name": "Black Sands",
+        "artist": "Bonobo",
+        "date": "2010 March 29",
+        "tracks": "12",
         "url": "https://bonobomusic.bandcamp.com/album/black-sands",
         "label": "bonobomusic",
-        "release": "Black Sands",
-        "artist": "Bonobo",
         "similarity": 1
       },
       {
-        "url": "https://bonobomusic.bandcamp.com/album/black-sands-remixed",
-        "label": "bonobomusic",
-        "release": "Black Sands Remixed",
-        "artist": "Bonobo",
-        "similarity": 0.93
-      }
-    ]
-    ```
-
-    Searching for release **weapons 001**, using empty artist (won't be used in the
-    ranking) and looking for label **raise**:
-    ```json
-    $ beetcamp 'weapons 001' '' raise | jq '.[:2]'
-    [
-      {
-        "url": "https://raiserecords.bandcamp.com/album/weapons-001-various-artists",
-        "label": "raiserecords",
-        "release": "WEAPONS 001 - VARIOUS ARTISTS",
-        "artist": "Mac Declos, Lacchesi, Umbraid, Lisa, Absurd, Moth, Clinical Hates, Eastel",
-        "similarity": 0.799
-      },
-      {
-        "url": "https://raiserecords.bandcamp.com/album/weapons-002-tauceti",
-        "label": "raiserecords",
-        "release": "WEAPONS 002 - TAUCETI",
-        "artist": "TAUCETI, Darzack, Raär, Mac Declos",
-        "similarity": 0.785
+        "type": "album",
+        "name": "Black Sands",
+        "artist": "Appalachian Terror Unit",
+        "date": "2011 August 01",
+        "tracks": "4",
+        "url": "https://appalachianterrorunit.bandcamp.com/album/black-sands",
+        "label": "appalachianterrorunit",
+        "similarity": 1
       }
     ]
     ```
@@ -53,21 +54,27 @@
 ### Updated
 
 * search: 
-  * if `label` field is available, the plugin now takes it into account when it ranks
+  - if `label` field is available, the plugin now takes it into account when it ranks
     search results. 
-  * `albumartist` field is not used to rank **compilations** anymore since some labels use
+  - `albumartist` field is not used to rank **compilations** anymore since some labels use
     label name, some use the list of artists, and others a variation of **Various Artists** - 
     we cannot reliably tell. `label` is used instead.
 
 * `album`: track titles are read to see whether they contain the album name. There are
-  cases where titles follow the following format: **Title ["Album Name" EP]'**
+  cases where titles have the following format: **Title [Album Name EP]**
 
 * `catalognum`: 
+  - search track titles
   - do not match if preceded by **]** character
-  - parse track titles for catalogue numbers
+  - allow catalogue numbers like **o-ton 113**
+  - allow a pair, if separated by a slash `/`
+  - removed a pattern responsible for a fair bit of false positives
 
-* `albumtype`: to determine whether a release is a compilation, check comments for string
-  **compilation**
+* `albumtype`: 
+  - to determine whether a release is a compilation, check comments for string
+    **compilation**
+  - check if all track titles are remixes; if so - include **remix** albumtype into
+    `albumtypes`
 
 * `albumtypes`:
   - **remix**: check for string **rmx** in album name
@@ -76,30 +83,36 @@
 
 ### Fixed
 
+* search: fixed searching of singletons, where the plugin now actually performs search instead of 
+  immediately returning the currently selected singleton when option **E** was selected
+  during the import process
+
+* album art fetching functionality has been broken for a while - it should now work fine
+
 * `album`: simplified album name clean-up logic and thus fixed a couple of edge cases
-* `title`: 
-  - some track titles which contain something in parentheses would have that part wrongly
-    removed. This is now fixed.
-  - minor fixes to do with featuring artists extraction from the title
-    For example, title: **Title (Extended ft. Some Artist)**
-    previously: **Title (Extended**
-    now: **Title (Extended)**
-  - allow titles to start with an opening parentheses :exploding_head:
-  - remove variations of **Bonus track** and **vinyl-only** from the title
 
 * `albumartist`: remove **, more** from the end
-
-* `artist`: 
-  - featuring artists given in square brackets are now parsed correctly
-  - lower/uppercase differences in the artist name are now taken into account and are
-    handled as the same artist
-  - when only one of the track artists in the release is not found, try splitting with
-    **-** to account for bad formatting
 
 * `catalognum`: in rare cases, if the track list was given in the comments, one of the
   track titles would get assumed for the catalognum and subsequently cleaned up. From now
   on this will only apply if **all** track names include the match (usually delimited by
   brackets at the end)
+
+* `title`: 
+  - track parsing has been refactored, therefore many of previously removed bits from the
+    title are now kept in place, such as bits in parentheses, double quotes (unless they
+    wrap the entire title) or non-alphanumeric characters at the end
+  - allow titles to start with an opening parentheses :exploding_head:
+  - when the title is found as **(Some Remix) Title**, it becomes **Title (Some Remix)**
+
+* `artist`: 
+  - featuring artists given in square brackets are now parsed correctly
+  - de-duplication now ignores the case
+  - when only one of the track artists in the release is missing, try splitting the name
+    with **-** (no spaces) to account for bad formatting
+
+* `track_alt`: track alts with numbers above 6 (like **A7**) and letters **A** and **B**
+  on their own are now extracted successfully
 
 ## [0.14.0] 2022-04-18
 
