@@ -63,7 +63,7 @@ def parse_title(source: str, title: str) -> JSONDict:
         pat = fr"PODCAST {index_pat} // {artist_pat}$"
     elif title.startswith("Voight-Kampff Podcast"):
         data["album"] = "Voight-Kampff Podcast"
-        pat = fr"(Episode|Podcast) {index_pat} // {artist_pat}$"
+        pat = fr"(?P<title>Episode {index_pat}) // {artist_pat}$"
     elif title.startswith("Reclaim Your"):
         data["album"] = "Reclaim Your City"
         pat = fr"City {index_pat} [|] {artist_pat}$"
@@ -71,7 +71,7 @@ def parse_title(source: str, title: str) -> JSONDict:
         data["album"] = "Boiler Room"
         pat = fr"{artist_pat} [|] Boiler Room x {title_pat}$"
     elif title.startswith("STRECK PO"):
-        data["album"] = "STRECK PODCAST"
+        data["label"], data["album"] = "STRECK", "STRECK PODCAST"
         pat = fr"{index_pat} [|] {artist_pat}"
     elif title.startswith("Hard Dance"):
         data["album"] = "Hard Dance"
@@ -80,8 +80,12 @@ def parse_title(source: str, title: str) -> JSONDict:
         data["album"] = "SLIT"
         pat = fr"{artist_pat} [|] SLIT - {title_pat}$"
     elif "FOLD Invites" in title:
-        data["album"], data["title"] = "FOLD Invites", title
+        data["label"], data["album"], data["title"] = "FOLD", "FOLD Invites", title
         pat = fr"Invites {artist_pat}$"
+    elif "IN•FER•NAL" in title:
+        data["label"], data["album"] = "IN•FER•NAL", "IN•FER•NAL PODCAST"
+        data["title"] = title.rsplit(" - ", 1)[0]
+        pat = fr"PODCAST #{index_pat} - {artist_pat}$"
     elif source == "Sarunas":
         data["artist"] = "SN"
         data["title"] = title

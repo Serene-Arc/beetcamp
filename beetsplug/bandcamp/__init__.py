@@ -73,6 +73,7 @@ class BandcampRequestsHandler:
         except requests.exceptions.RequestException:
             self._info("Error while fetching URL: {}", url)
             return ""
+        response.encoding = "utf-8"
         return response.text
 
 
