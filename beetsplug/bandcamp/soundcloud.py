@@ -24,7 +24,7 @@ def get_country(loc: str) -> str:
 
 def parse_title(source: str, title: str) -> JSONDict:
     index_pat = r"(?:\s|0)*(?P<index>[1-9][0-9]*)"
-    artist_pat = r"(?P<artist>[^_-]+)"
+    artist_pat = r"(?P<artist>[^\[]?[^\[_-]+[[]?)"
     title_pat = r"(?P<title>[^-]+)"
     data: JSONDict = {}
     if title.startswith("DETECT"):
@@ -89,6 +89,9 @@ def parse_title(source: str, title: str) -> JSONDict:
     elif "PUPPY MIX" in title:
         data["label"], data["album"] = "PUPPY", "PUPPY MIX"
         pat = rf".PUPPY MIX {index_pat}. \* {artist_pat}$"
+    elif title.startswith("DEADCAST"):
+        data["album"] = "DEADCAST"
+        pat = rf"DEADCAST{index_pat} x {artist_pat}( [\[](?P<label>[^]]+)[]])?$"
     elif source == "Sarunas":
         data["artist"] = "SN"
         data["title"] = title
