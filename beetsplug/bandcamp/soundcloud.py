@@ -86,6 +86,9 @@ def parse_title(source: str, title: str) -> JSONDict:
         data["label"], data["album"] = "IN•FER•NAL", "IN•FER•NAL PODCAST"
         data["title"] = title.rsplit(" - ", 1)[0]
         pat = fr"PODCAST #{index_pat} - {artist_pat}$"
+    elif "PUPPY MIX" in title:
+        data["label"], data["album"] = "PUPPY", "PUPPY MIX"
+        pat = rf".PUPPY MIX {index_pat}. \* {artist_pat}$"
     elif source == "Sarunas":
         data["artist"] = "SN"
         data["title"] = title
