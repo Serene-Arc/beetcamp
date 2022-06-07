@@ -46,7 +46,7 @@ def parse_title(source: str, title: str) -> JSONDict:
         data["album"] = "Axxidcast"
         pat = r"w/ (?P<artist>[^-]+) - .* (?P<index>[0-9.]+)$"
     elif title.startswith("CRUDE"):
-        data["album"] = "CRUDE MIX"
+        data["album"] = "CRUDE MIX Series"
         data["label"] = "CRUDE"
         pat = fr"CRUDE MIX\D+{index_pat} - {artist_pat}(_+(?P<title>[^_]+))?$"
     elif "SlamRadio" in title:
@@ -92,6 +92,9 @@ def parse_title(source: str, title: str) -> JSONDict:
     elif title.startswith("DEADCAST"):
         data["album"] = "DEADCAST"
         pat = rf"DEADCAST{index_pat} x {artist_pat}( [\[](?P<label>[^]]+)[]])?$"
+    elif re.match(r"Hardcore \d+", title):
+        data["album"], data["title"] = "Hardcore", title
+        pat = rf"Hardcore {index_pat}"
     elif source == "Sarunas":
         data["artist"] = "SN"
         data["title"] = title
